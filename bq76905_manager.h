@@ -10,7 +10,6 @@ extern "C" {
 /* =============================================================================
    BQ76905 Battery Monitor & Protector for 2-series to 5-series battery packs
    UAV Charging Station Project
-   Developed based on project concept, definition & plan documents.
    ============================================================================= */
 
 /* Return Codes */
@@ -20,8 +19,8 @@ extern "C" {
 /* -----------------------------------------------------------------------------
    I2C Address & Command/ Register Definitions
    -----------------------------------------------------------------------------
-   Update these addresses and command codes according to your board design
-   and the BQ76905 datasheet ([46] :contentReference[oaicite:2]{index=2}&#8203;:contentReference[oaicite:3]{index=3}).
+   Update these addresses and command codes according to the board design
+   and the BQ76905 datasheet.
 -----------------------------------------------------------------------------*/
 
 /* Example I2C address – adjust if different */
@@ -94,7 +93,7 @@ int bq76905_enable_cell_balancing(uint8_t cell_mask);
 
 /* Optional conversion functions
    These functions convert raw readings into common engineering units.
-   For example, you can convert a raw pack voltage (in mV) to volts. */
+   For example, one can convert a raw pack voltage (in mV) to volts. */
 static inline float bq76905_convert_voltage(uint16_t raw) {
     return raw * BQ76905_VOLTAGE_LSB; // V = (mV value)* (4e-3)
 }
