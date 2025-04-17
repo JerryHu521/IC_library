@@ -4,10 +4,10 @@
 /* =============================================================================
    Low-Level I2C/SMBus Stub Functions
    =============================================================================
-   Replace these stubs with your actual hardware-specific I2C communication functions.
+   Replace these stubs with thr actual hardware-specific I2C communication functions.
 ============================================================================= */
 static int i2c_write_word(uint8_t dev_addr, uint8_t reg, uint16_t data) {
-    /* Implement your I2C write: send the 8-bit register address followed by the 16-bit word.
+    /* Implement the I2C write: send the 8-bit register address followed by the 16-bit word.
        Example: hardware_i2c_write(dev_addr, reg, (uint8_t *)&data, 2); */
     (void)dev_addr;
     (void)reg;
@@ -18,7 +18,7 @@ static int i2c_write_word(uint8_t dev_addr, uint8_t reg, uint16_t data) {
 static int i2c_read_word(uint8_t dev_addr, uint8_t reg, uint16_t *data) {
     if (data == 0)
         return BQ76905_ERROR;
-    /* Implement your I2C read: send the register address, then read 2 bytes into data.
+    /* Implement the I2C read: send the register address, then read 2 bytes into data.
        Example: hardware_i2c_read(dev_addr, reg, (uint8_t *)data, 2); */
     /* For simulation/demonstration, return dummy values based on the register: */
     switch (reg) {
@@ -160,8 +160,8 @@ int bq76905_set_voltage_thresholds(uint16_t ov_threshold, uint16_t uv_threshold)
 */
 int bq76905_enable_cell_balancing(uint8_t cell_mask) {
     int ret;
-    /* For example, write the cell balancing configuration to a hypothetical register.
-       Here we assume register 0x30 controls cell balancing.
+    /* Write the cell balancing configuration to a hypothetical register.
+       Here, I assume register 0x30 controls cell balancing.
     */
     ret = i2c_write_word(BQ76905_I2C_ADDR, 0x30, (uint16_t)cell_mask);
     return ret;
