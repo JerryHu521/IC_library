@@ -6,106 +6,111 @@ extern "C" {
 #endif
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /* =============================================================================
-   BQ76905 Battery Monitor & Protector for 2-series to 5-series battery packs
+   BQ76905 Battery Monitor & Protector for 3-series LiPo Battery Packs
    UAV Charging Station Project
    ============================================================================= */
 
-/* Return Codes */
-#define BQ76905_SUCCESS 0
-#define BQ76905_ERROR   -1
+/** \brief Status codes returned by BQ76905 driver functions. */
+typedef enum {
+    BQ76905_OK  =  0,  /**< Operation succeeded */
+    BQ76905_ERR = -1   /**< Operation failed */
+} bq76905_status_t;
 
-/* -----------------------------------------------------------------------------
-   I2C Address & Command/ Register Definitions
-   -----------------------------------------------------------------------------
-   Update these addresses and command codes according to the board design
-   and the BQ76905 datasheet.
------------------------------------------------------------------------------*/
+/** \brief 7-bit I2C address for the BQ76905. */
+#define BQ76905_I2C_ADDR       0x18U
 
-/* Example I2C address – adjust if different */
-#define BQ76905_I2C_ADDR  0x18
+/** \brief Register addresses (partial). */
+enum {
+    BQ76905_REG_CELL0_VOLTAGE  = 0x04U,
+    BQ76905_REG_CELL1_VOLTAGE  = 0x06U,
+    BQ76905_REG_CELL2_VOLTAGE  = 0x08U,
+    /* 0x0A,0x0C reserved for cells 4/5 in 5S packs */
+    BQ76905_REG_PACK_VOLTAGE   = 0x0EU,
+    BQ76905_REG_CURRENT        = 0x10U,
+    BQ76905_REG_TEMPERATURE    = 0x12U,
+    BQ76905_REG_OV_THRESHOLD   = 0x20U,
+    BQ76905_REG_UV_THRESHOLD   = 0x22U,
+    BQ76905_REG_BALANCE_CTRL   = 0x30U
+};
 
-/* Register addresses (placeholders):
-   These registers are assumed for:
-     - Cell voltage measurements (each cell: 16-bit, 2 bytes)
-     - Pack voltage measurement (derived from cells or a dedicated register)
-     - Current measurement
-     - Temperature measurement (internal ADC/thermistor)
-     - Protection thresholds (if configurable)
-*/
-#define BQ76905_REG_CELL0_VOLTAGE    0x04  // Voltage for Cell 1 (mV)
-#define BQ76905_REG_CELL1_VOLTAGE    0x06  // Voltage for Cell 2 (mV)
-#define BQ76905_REG_CELL2_VOLTAGE    0x08  // Voltage for Cell 3 (mV)
-#define BQ76905_REG_CELL3_VOLTAGE    0x0A  // Voltage for Cell 4 (mV)
-#define BQ76905_REG_CELL4_VOLTAGE    0x0C  // Voltage for Cell 5 (mV)
-#define BQ76905_REG_PACK_VOLTAGE     0x0E  // Pack Voltage (mV)
-#define BQ76905_REG_CURRENT          0x10  // Pack Current (mA; signed)
-#define BQ76905_REG_TEMPERATURE      0x12  // Battery Temperature (raw value, units defined below)
-#define BQ76905_REG_OV_THRESHOLD     0x20  // Overvoltage threshold (mV)
-#define BQ76905_REG_UV_THRESHOLD     0x22  // Undervoltage threshold (mV)
+/** \brief ADC conversion scales. */
+#define BQ76905_VOLTAGE_LSB_MV   4U       /**< mV per LSB for cell & pack voltage */
+#define BQ76905_CURRENT_LSB_MA   1U       /**< mA per LSB for pack current */
+#define BQ76905_TEMP_LSB_10THC   1U       /**< 0.1 °C per LSB for temperature */
 
-/* Conversion constants – update as needed.
-   For example, if the voltage ADC LSB is 4 mV, then:
-*/
-#define BQ76905_VOLTAGE_LSB    0.004f   // 4 mV per LSB (voltage)
-#define BQ76905_CURRENT_LSB    0.001f   // 1 mA per LSB (current)
-#define BQ76905_TEMPERATURE_LSB 0.1f    // Temperature measured in 0.1 °C units
+/** \brief Default configuration: 3 cells, 0.5Ω sense resistor. */
+#define BQ76905_CELL_COUNT       3U
+#define BQ76905_SENSE_RES_MOHM   500U     /**< milliohms */
 
-/* -----------------------------------------------------------------------------
-   Data Structures
------------------------------------------------------------------------------*/
-
-/* Data structure holding measurements from the BQ76905 */
+/**
+ * \brief Container for BQ76905 measurements.
+ */
 typedef struct {
-    /* Battery pack measurements */
-    uint16_t pack_voltage;        // in mV
-    int16_t  pack_current;        // in mA (signed; positive = charging, negative = discharging)
-    int16_t  temperature;         // raw temperature reading (0.1°C units)
-    /* Individual cell voltages (for up to 5 cells) */
-    uint16_t cell_voltage[5];     // in mV; only the first ‘N’ cells are valid based on your battery configuration
+    uint16_t cell_voltage[BQ76905_CELL_COUNT]; /**< Cell voltages in mV */
+    uint16_t pack_voltage;                    /**< Pack voltage in mV */
+    int16_t  pack_current;                    /**< Pack current in mA */
+    int16_t  temperature;                     /**< Temperature in 0.1 °C units */
 } bq76905_data_t;
 
-/* -----------------------------------------------------------------------------
-   Public API Functions
------------------------------------------------------------------------------*/
+/* Public API */
 
-/* Initializes the BQ76905 device.
-   Configures ADC modes and protection settings as required.
-   Returns BQ76905_SUCCESS on success. */
-int bq76905_init(void);
+/**
+ * \brief Initialize the BQ76905 device (sets up ADC, thresholds, etc.).
+ * \return BQ76905_OK or BQ76905_ERR
+ */
+bq76905_status_t bq76905_init(void);
 
-/* Reads battery data from the BQ76905.
-   Populates the provided bq76905_data_t structure.
-   Returns BQ76905_SUCCESS on success. */
-int bq76905_read_data(bq76905_data_t *data);
+/**
+ * \brief Read all sensor data from the BQ76905.
+ * \param data Pointer to measurement struct to populate.
+ * \return BQ76905_OK or BQ76905_ERR
+ */
+bq76905_status_t bq76905_read_data(bq76905_data_t *data);
 
-/* Sets overvoltage and undervoltage thresholds for the battery pack.
-   Thresholds are specified in millivolts.
-   Returns BQ76905_SUCCESS on success. */
-int bq76905_set_voltage_thresholds(uint16_t ov_threshold, uint16_t uv_threshold);
+/**
+ * \brief Set overvoltage and undervoltage thresholds (in mV).
+ * \param ov_mV Overvoltage threshold
+ * \param uv_mV Undervoltage threshold
+ * \return BQ76905_OK or BQ76905_ERR
+ */
+bq76905_status_t bq76905_set_voltage_thresholds(uint16_t ov_mV,
+                                                uint16_t uv_mV);
 
-/* Enables host-controlled cell balancing for selected cells.
-   The cell_mask argument is a bit mask indicating which cells to balance.
-   For example, bit 0 for cell 1, bit 1 for cell 2, etc.
-   Returns BQ76905_SUCCESS on success. */
-int bq76905_enable_cell_balancing(uint8_t cell_mask);
+/**
+ * \brief Enable host-controlled cell balancing via bitmask.
+ * \param cell_mask Bits 0–2 correspond to cells 1–3.
+ * \return BQ76905_OK or BQ76905_ERR
+ */
+bq76905_status_t bq76905_enable_cell_balancing(uint8_t cell_mask);
 
-/* Optional conversion functions
-   These functions convert raw readings into common engineering units.
-   For example, one can convert a raw pack voltage (in mV) to volts. */
-static inline float bq76905_convert_voltage(uint16_t raw) {
-    return raw * BQ76905_VOLTAGE_LSB; // V = (mV value)* (4e-3)
+/* Conversion helpers */
+
+/**
+ * \brief Convert raw mV to volts.
+ */
+static inline float bq76905_convert_voltage(uint16_t raw_mV) {
+    return raw_mV * 1e-3f;
 }
-static inline float bq76905_convert_current(int16_t raw) {
-    return raw * BQ76905_CURRENT_LSB; // A = (mA value)* (1e-3)
+
+/**
+ * \brief Convert raw mA to amps.
+ */
+static inline float bq76905_convert_current(int16_t raw_mA) {
+    return raw_mA * 1e-3f;
 }
+
+/**
+ * \brief Convert raw 0.1°C units to °C.
+ */
 static inline float bq76905_convert_temperature(int16_t raw) {
-    return raw * BQ76905_TEMPERATURE_LSB; // °C (if raw in 0.1°C units)
+    return raw * 0.1f;
 }
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // BQ76905_MANAGER_H
+#endif /* BQ76905_MANAGER_H */
