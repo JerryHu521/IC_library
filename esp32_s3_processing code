@@ -1,0 +1,182 @@
+#include "bq76905_manager.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include "driver/i2c.h"
+#include "esp_log.h"
+
+static const char *TAG = "BQ76905";
+
+/* =============================================================================
+   BQ76905 Status Register and Bit Masks
+============================================================================= */
+#define BQ76905_REG_STATUS       0x00U
+#define BQ76905_STATUS_UV_BIT    (1U << 0)
+#define BQ76905_STATUS_OV_BIT    (1U << 1)
+#define BQ76905_STATUS_OT_BIT    (1U << 2)
+#define BQ76905_STATUS_UT_BIT    (1U << 3)
+
+/* =============================================================================
+   Low-Level I2C Read/Write
+============================================================================= */
+static esp_err_t i2c_write_word(uint8_t dev_addr, uint8_t reg, uint16_t data) {
+    uint8_t buf[3] = { reg, (uint8_t)(data >> 8), (uint8_t)data };
+    return i2c_master_write_to_device(
+        I2C_MASTER_NUM,
+        dev_addr,
+        buf,
+        sizeof(buf),
+        I2C_TIMEOUT_MS / portTICK_PERIOD_MS
+    );
+}
+
+static esp_err_t i2c_read_word(uint8_t dev_addr, uint8_t reg, uint16_t *data) {
+    if (!data) return ESP_ERR_INVALID_ARG;
+    uint8_t buf[2] = {0};
+    esp_err_t err = i2c_master_write_read_device(
+        I2C_MASTER_NUM,
+        dev_addr,
+        &reg,
+        1,
+        buf,
+        sizeof(buf),
+        I2C_TIMEOUT_MS / portTICK_PERIOD_MS
+    );
+    if (err != ESP_OK) return err;
+    *data = ((uint16_t)buf[0] << 8) | buf[1];
+    return ESP_OK;
+}
+
+/* =============================================================================
+   Initialization
+============================================================================= */
+int bq76905_init(void) {
+    // Reset device (hypothetical command 0x00)
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_STATUS, 0x0001) != ESP_OK) {
+        ESP_LOGE(TAG, "Reset command failed");
+        return BQ76905_ERR;
+    }
+    // Optionally configure ADC speed, enable PEC, etc.
+    ESP_LOGI(TAG, "BQ76905 initialized");
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   Read Individual Parameters
+============================================================================= */
+bq76905_status_t bq76905_read_cell_voltage(uint8_t cell_idx, uint16_t *mV) {
+    if (cell_idx >= BQ76905_CELL_COUNT || !mV) return BQ76905_ERR;
+    uint8_t reg = (uint8_t)(BQ76905_REG_CELL0_VOLTAGE + cell_idx * 2);
+    if (i2c_read_word(BQ76905_I2C_ADDR, reg, mV) != ESP_OK) return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+bq76905_status_t bq76905_read_pack_voltage(uint16_t *mV) {
+    if (!mV) return BQ76905_ERR;
+    if (i2c_read_word(BQ76905_I2C_ADDR, BQ76905_REG_PACK_VOLTAGE, mV) != ESP_OK)
+        return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+bq76905_status_t bq76905_read_current(int16_t *mA) {
+    if (!mA) return BQ76905_ERR;
+    uint16_t raw;
+    if (i2c_read_word(BQ76905_I2C_ADDR, BQ76905_REG_CURRENT, &raw) != ESP_OK)
+        return BQ76905_ERR;
+    *mA = (int16_t)raw;
+    return BQ76905_OK;
+}
+
+bq76905_status_t bq76905_read_temperature(int16_t *decic) {
+    if (!decic) return BQ76905_ERR;
+    uint16_t raw;
+    if (i2c_read_word(BQ76905_I2C_ADDR, BQ76905_REG_TEMPERATURE, &raw) != ESP_OK)
+        return BQ76905_ERR;
+    *decic = (int16_t)raw;
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   Bulk Read Data Structure
+============================================================================= */
+int bq76905_read_data(bq76905_data_t *data) {
+    if (!data) return BQ76905_ERR;
+    for (uint8_t i = 0; i < BQ76905_CELL_COUNT; i++) {
+        if (bq76905_read_cell_voltage(i, &data->cell_voltage[i]) != BQ76905_OK)
+            return BQ76905_ERR;
+    }
+    if (bq76905_read_pack_voltage(&data->pack_voltage) != BQ76905_OK)
+        return BQ76905_ERR;
+    if (bq76905_read_current(&data->pack_current) != BQ76905_OK)
+        return BQ76905_ERR;
+    if (bq76905_read_temperature(&data->temperature) != BQ76905_OK)
+        return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   Status & Fault Handling
+============================================================================= */
+bq76905_status_t bq76905_read_status(uint16_t *status) {
+    if (!status) return BQ76905_ERR;
+    if (i2c_read_word(BQ76905_I2C_ADDR, BQ76905_REG_STATUS, status) != ESP_OK)
+        return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+bool bq76905_is_under_voltage(void) {
+    uint16_t st;
+    if (bq76905_read_status(&st) != BQ76905_OK) return false;
+    return (st & BQ76905_STATUS_UV_BIT) != 0;
+}
+
+bool bq76905_is_over_voltage(void) {
+    uint16_t st;
+    if (bq76905_read_status(&st) != BQ76905_OK) return false;
+    return (st & BQ76905_STATUS_OV_BIT) != 0;
+}
+
+/**
+ * \brief Clear specific fault bits by writing 1s to STATUS.
+ */
+bq76905_status_t bq76905_clear_faults(uint16_t mask) {
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_STATUS, mask) != ESP_OK)
+        return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   Threshold & Protection Configuration
+============================================================================= */
+bq76905_status_t bq76905_set_voltage_thresholds(uint16_t ov_mV, uint16_t uv_mV) {
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_OV_THRESHOLD, ov_mV) != ESP_OK) return BQ76905_ERR;
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_UV_THRESHOLD, uv_mV) != ESP_OK) return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   Cell Balancing Control
+============================================================================= */
+bq76905_status_t bq76905_enable_cell_balancing(uint8_t cell_mask) {
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_BALANCE_CTRL, cell_mask) != ESP_OK)
+        return BQ76905_ERR;
+    return BQ76905_OK;
+}
+
+bq76905_status_t bq76905_disable_cell_balancing(void) {
+    return bq76905_enable_cell_balancing(0);
+}
+
+/* =============================================================================
+   Utility: Soft Reset (if supported)
+============================================================================= */
+int bq76905_soft_reset(void) {
+    // Hypothetical soft reset via writing command 0x01 to STATUS
+    if (i2c_write_word(BQ76905_I2C_ADDR, BQ76905_REG_STATUS, 0x0001) != ESP_OK)
+        return BQ76905_ERR;
+    vTaskDelay(pdMS_TO_TICKS(50));
+    return BQ76905_OK;
+}
+
+/* =============================================================================
+   End of File
+============================================================================= */
